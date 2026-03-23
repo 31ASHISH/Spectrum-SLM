@@ -1,0 +1,50 @@
+# Spectrum-SLM .gitignore
+
+# ── Large data files (SDR data) ──────────────────────────────────────────────
+*.pth
+*.pkl
+*.bin
+*.onnx
+
+# Checkpoint directory (can be large)
+slm_checkpoints/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.so
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Outputs ───────────────────────────────────────────────────────────────────
+metrics.json
+logs/
+runs/
+wandb/
+
+# BUT keep CSV files (they are small enough for git)
+!*.csv
