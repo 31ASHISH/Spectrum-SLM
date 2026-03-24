@@ -68,7 +68,7 @@ def save_checkpoint(model, optimizer, epoch, val_loss, path):
 
 
 def load_checkpoint(model, path, optimizer=None, device='cpu'):
-    ckpt = torch.load(path, map_location=device)
+    ckpt = torch.load(path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt['model'])
     if optimizer and 'optimizer' in ckpt:
         optimizer.load_state_dict(ckpt['optimizer'])
@@ -717,6 +717,11 @@ def main(args):
 
     # ── Phase 1 ───────────────────────────────────────────────────────────────
     if args.phase >= 1:
+        ckpt_p1 = os.path.join(save_dir, 'slm_phase1_best.pt')
+        if os.path.exists(ckpt_p1):
+            print("\n  [INFO] Resuming Phase 1 from existing checkpoint...")
+            load_checkpoint(model, ckpt_p1, device=device)
+            
         history1 = pretrain_msm(
             model, tr_loader, vl_loader,
             n_epochs=args.epochs_p1, lr=args.lr, device=device,

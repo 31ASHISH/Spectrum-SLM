@@ -52,9 +52,13 @@ def load_pth_file(path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
       pu_labels  : (N,)      int    (0 / 1)
       snr_labels : (N,)      float  (bin centre in dB)
     """
-    data = torch.load(path, map_location='cpu', weights_only=False)
-    bins   = data['bins']
-    pairs  = data['pairs_by_bin']
+    try:
+        data = torch.load(path, map_location='cpu', weights_only=False)
+    except Exception as e:
+        print(f"  [WARN] Failed to load {path}: {e}")
+        return np.empty((0, N_BINS)), np.empty(0), np.empty(0)
+    bins   = data.get('bins', [])
+    pairs  = data.get('pairs_by_bin', {})
 
     all_psds, all_pu, all_snr = [], [], []
     for snr_bin in bins:

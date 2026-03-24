@@ -1,0 +1,183 @@
+\documentclass[a4paper, 10.5pt]{article}
+
+% ── PACKAGES ─────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[left=1.7cm, right=1.7cm, top=1.4cm, bottom=1.4cm]{geometry}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fontawesome5}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{setspace}
+
+% ── COLORS ───────────────────────────────────────────────
+\definecolor{heading}{RGB}{30, 30, 30}
+\definecolor{subtext}{RGB}{80, 80, 80}
+\definecolor{accent}{RGB}{0, 70, 140}
+\definecolor{rulecolor}{RGB}{60, 60, 60}
+
+% ── PAGE SETUP ───────────────────────────────────────────
+\pagestyle{empty}
+\raggedright
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\setstretch{1.08}
+
+% ── SECTION FORMAT ───────────────────────────────────────
+\titleformat{\section}
+  {\large\bfseries\color{heading}\scshape}
+  {}{0em}{}
+  [\vspace{-6pt}{\color{rulecolor}\rule{\textwidth}{0.6pt}}\vspace{-2pt}]
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+
+% ── LIST FORMAT ──────────────────────────────────────────
+\setlist[itemize]{
+  noitemsep,
+  topsep=2pt,
+  parsep=1pt,
+  leftmargin=1.4em,
+  label={\small\textbullet}
+}
+
+% ── CUSTOM COMMANDS ──────────────────────────────────────
+\newcommand{\entry}[3]{%
+  \vspace{4pt}%
+  \textbf{#1} \hfill \textcolor{subtext}{\small #3}\\[-2pt]
+  \textit{\textcolor{subtext}{#2}}%
+  \vspace{2pt}%
+}
+
+\newcommand{\entrysingle}[2]{%
+  \vspace{4pt}%
+  \textbf{#1} \hfill \textcolor{subtext}{\small #2}%
+  \vspace{2pt}%
+}
+
+% ══════════════════════════════════════════════════════════
+\begin{document}
+
+% ── HEADER ───────────────────────────────────────────────
+\begin{center}
+  {\LARGE\bfseries\color{heading} Ashish Joshi}\\[7pt]
+  {\small
+    \faEnvelope\ \href{mailto:connectwithashish@gmail.com}{connectwithashish@gmail.com}
+    \enspace\textbar\enspace
+    \faPhone\ +91 9305292142
+    \enspace\textbar\enspace
+    \faLinkedin\ \href{https://www.linkedin.com/in/ashish-joshi-6204442b7/}{LinkedIn}
+    \enspace\textbar\enspace
+    \faGithub\ \href{https://github.com/31ASHISH}{GitHub}
+    \enspace\textbar\enspace
+    \faCode\ \href{https://leetcode.com/u/Ashish_Joshi31/}{LeetCode}
+  }
+\end{center}
+
+\vspace{-2pt}
+
+% ── EDUCATION ────────────────────────────────────────────
+\section{Education}
+
+\textbf{Indian Institute of Technology, Palakkad} \hfill \textcolor{subtext}{\small Aug 2023 -- Present}\\
+B.Tech in Civil Engineering \hfill CGPA: \textbf{8.60}\\[2pt]
+{\textbf{AI \& Data Science Focus:} Machine Learning, Deep Learning, NLP, Agentic AI, Large Language Models}\\
+{\textbf{Technical Exposure:} Statistical modeling, spatiotemporal datasets, data-driven analysis}
+
+% ── PROFILE ──────────────────────────────────────────────
+\section{Profile}
+
+{\small
+AI-focused undergraduate with hands-on experience building \textbf{LLM-powered agentic systems}, RAG pipelines, and deep learning models across NLP, climate science, signal processing, and financial analytics.
+Driven to contribute to \textbf{high-impact, publishable research} in Agentic AI, Generative AI, and Large Language Models.
+}
+
+% ── TECHNICAL SKILLS ─────────────────────────────────────
+\section{Technical Skills}
+
+\textbf{AI \& Machine Learning:} Generative AI, Large Language Models (LLMs), Agentic AI, Retrieval-Augmented Generation (RAG), NLP, Deep Learning, Time-Series \& Spatiotemporal Modeling\\[3pt]
+\textbf{Frameworks \& Libraries:} PyTorch, Hugging Face Transformers, TensorFlow, Scikit-learn\\[3pt]
+\textbf{Programming Languages:} Python, C++\\[3pt]
+\textbf{Data \& Analysis:} Feature Engineering, Exploratory Data Analysis (EDA), Statistical Evaluation, Dataset Curation\\[3pt]
+\textbf{Developer Tools:} Git, GitHub, Jupyter Notebook, Google Colab, Linux, Kaggle, LaTeX
+
+% ── EXPERIENCE ───────────────────────────────────────────
+\section{Experience}
+
+\entry{IPTIF Research Intern}{IIT Palakkad}{Feb 2026 -- Present}
+\begin{itemize}
+  \item Developing a hybrid drought prediction framework integrating \textbf{Wavelet Transform with 4 ML/DL models} (CNN, XGBoost, ConvLSTM, WCNN), analyzing \textbf{5,000+ lat/lon grid points} across India over \textbf{1950--2023} monthly climate records.
+  \item Spearheading a \textbf{patent-oriented Wavelet--ML system} combining multi-scale signal decomposition with learning-based prediction for national-scale drought index forecasting.
+\end{itemize}
+
+\entry{EAYL Innovation Lab Intern}{IIT Palakkad}{Feb 2026 -- Present}
+\begin{itemize}
+  \item Architecting the database schema and backend workflows for the \textbf{IITPKD campus application}, designing modular API endpoints with scalable data integration.
+  \item Automating manual administrative workflows using \textbf{n8n}, incorporating global search capabilities and event-driven application features.
+\end{itemize}
+
+\entry{Data Analytics Intern}{MSME Sampark, India}{May 2025 -- Jul 2025}
+\begin{itemize}
+  \item Developed Python-based analytical pipelines to process structured datasets from multiple early-stage startups, automating data cleaning and feature extraction.
+  \item Deployed statistical models and EDA dashboards to surface actionable insights, informing strategic recommendations for partner startups.
+\end{itemize}
+
+\entry{Product Developer Intern (Data \& AI Focus)}{Plant Khareedo, India}{May 2024 -- Jul 2024}
+\begin{itemize}
+  \item Analyzed customer transaction data to quantify demand patterns, purchase behavior, and user engagement trends across product categories.
+  \item Executed A/B experiments evaluating growth strategies and partnered with product teams to implement data-informed feature prioritization.
+\end{itemize}
+
+\newpage
+
+% ── PROJECTS ─────────────────────────────────────────────
+\section{Projects}
+
+\entrysingle{Real-Time Financial Intelligence System}{\normalfont\small\textcolor{subtext}{Python, LLMs, RAG, LSTM, Agentic AI}}
+\begin{itemize}
+  \item Architected an \textbf{agentic AI system} fusing financial time-series, SEC filings, and market news with RAG-based retrieval, evaluated on \textbf{FinBen}, \textbf{FLUE}, and \textbf{FinanceBench} benchmarks.
+  \item Implemented RAG pipelines enabling LLMs to perform contextual reasoning over financial knowledge bases, benchmarked on \textbf{FPB} sentiment and \textbf{FiQA} opinion mining tasks.
+  \item Integrated LSTM-based time-series forecasting with LLM-driven agentic reasoning for automated portfolio risk assessment and decision-support.
+\end{itemize}
+
+\entrysingle{SPI Prediction using ML/DL Models for Drought Forecasting}{\normalfont\small\textcolor{subtext}{Python, ML/DL, Spatiotemporal Modeling}}
+\begin{itemize}
+  \item Investigated drought predictability across \textbf{70 lat/lon points} in India using monthly precipitation data from \textbf{1950--2021} and the Standardized Precipitation Index (SPI).
+  \item Analyzed the influence of climate oscillation indices (ENSO, PDO, IOD) through correlation analysis and feature engineering to identify key drought predictors.
+  \item Trained and benchmarked CNN, RNN, ConvLSTM, XGBoost, and Wavelet-CNN models to capture nonlinear spatiotemporal dependencies in SPI prediction.
+  \item Assessed model generalization using comparative error metrics and temporal cross-validation across different Indian climate zones.
+\end{itemize}
+
+\entrysingle{Large-Scale Sentiment Analysis on Amazon Kindle Reviews}{\normalfont\small\textcolor{subtext}{NLP, Representation Learning}}
+\begin{itemize}
+  \item Processed \textbf{980K+ customer reviews} through NLP preprocessing pipelines including tokenization, stopword removal, lemmatization, and vectorization.
+  \item Benchmarked classical ML models (Logistic Regression, SVM, Random Forest) against LSTM and BiLSTM architectures for sentiment classification.
+  \item Compared TF-IDF and Word2Vec embedding strategies to evaluate dense vs.\ sparse representation impact on deep learning sequence models.
+\end{itemize}
+
+\entrysingle{Spectrum-SLM: Small Language Model for Cognitive Radio Spectrum Sensing}{\normalfont\small\textcolor{subtext}{PyTorch, Transformers, SDR, Signal Processing}}
+\begin{itemize}
+  \item Designed a \textbf{GPT-inspired Small Language Model ($\sim$1M params)} for real-time spectrum sensing using ADALM-Pluto SDR, treating \textbf{176-bin} PSD vectors as token sequences.
+  \item Curated a \textbf{152K+ sample} multi-modulation dataset (BPSK, QPSK, 8PSK, 16QAM) from real RF measurements at 2.4\,GHz with GNU Radio.
+  \item Engineered a patch-based spectrum tokenizer with a 3-phase pipeline: self-supervised Masked Spectrum Modeling, multi-task fine-tuning, and autoregressive prediction.
+  \item Benchmarked against ensemble baselines (RandomForest + XGBoost + AdaBoost), targeting improved low-SNR detection ($<$8\,dB) with multi-task inference.
+\end{itemize}
+
+% ── ACHIEVEMENTS ─────────────────────────────────────────
+\section{Achievements}
+
+\begin{itemize}
+  \item Awarded \textbf{Honda Hope Scholarship 2024} --- recognized for academic excellence and innovation.
+  \item Secured \textbf{5th Place at Engineers' Conclave (Inter-IIT)} --- evaluated for technical depth among teams from 23 IITs.
+  \item Achieved \textbf{2nd Place, COGNIFAI Competition} (NLP \& ML).
+  \item Ranked \textbf{Top 10, Agentic AI Pathway --- Inter IIT Tech Meet 8.0}.
+  \item Won \textbf{1st Place, FinTech Competition}.
+  \item Solved \textbf{160+ problems on LeetCode}.
+\end{itemize}
+
+% ── INTERESTS ────────────────────────────────────────────
+\section{Areas of Interest}
+
+{\small Agentic AI \enspace$\cdot$\enspace Generative AI \enspace$\cdot$\enspace Large Language Models \enspace$\cdot$\enspace Retrieval-Augmented Generation \enspace$\cdot$\enspace AI Agents \enspace$\cdot$\enspace Time-Series and Spatiotemporal Modeling}
+
+\end{document}
