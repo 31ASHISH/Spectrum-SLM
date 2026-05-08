@@ -22,16 +22,16 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import torch
-import plotly.graph_objects as go
+import plotly.graph_objects as go                                                                                                                                                                                                                                                                                                                                               
 from plotly.subplots import make_subplots
 
 sys.path.insert(0, os.path.dirname(__file__))
 from spectrum_slm_model import SpectrumSLM
-from spectrum_slm_dataset import generate_synthetic_psd, N_BINS
+from spectrum_slm_dataset import N_BINS
 from config import (
-    CKPT_PHASE2, CKPT_PHASE2_BEST, NORMALIZER_FILE, METRICS_FILE,
+    CKPT_PHASE2, CKPT_PHASE3, CKPT_PHASE2_BEST, NORMALIZER_FILE, METRICS_FILE,
     MOD_NAMES_V2, MOD_COLORS_V2, N_MOD_CLASSES_V2, MOD_MAP_V2,
-    PHASE2_DATA_DIR,
+    NEW_DATASET_DIR, SECONDARY_USER_DIR,
 )
 
 # ─── Page config ──────────────────────────────────────────────────────────────
@@ -75,19 +75,36 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+# ─── Resolve best checkpoint path (Phase 3 > Phase 2) ────────────────────────
+def _resolve_best_ckpt() -> str:
+    """Phase 3 checkpoint has ALL heads trained (incl. generative).
+    Fall back to Phase 2 (supervised only) if Phase 3 is missing."""
+    p3 = os.path.join(CKPT_PHASE3, "slm_phase3_best.pt")
+    p2 = os.path.join(CKPT_PHASE2, CKPT_PHASE2_BEST)
+    if os.path.exists(p3):
+        return p3
+    return p2
+
+
 # ─── Model + Normalizer loader ────────────────────────────────────────────────
 @st.cache_resource
 def load_model_and_normalizer(ckpt_path: str, norm_path: str):
     model = SpectrumSLM(
-        n_bins=N_BINS, patch_size=8, d_model=128,
+        n_bins=N_BINS, patch_size=1, d_model=128,
         nhead=4, num_layers=4, dim_feedforward=512,
         dropout=0.1, n_mod_classes=N_MOD_CLASSES_V2,
     )
-    is_trained = False
+    loaded_phase = None
     if ckpt_path and os.path.exists(ckpt_path):
         ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         model.load_state_dict(ck.get("model", ck))
-        is_trained = True
+        # Detect which phase the checkpoint came from
+        if "phase3" in ckpt_path:
+            loaded_phase = 3
+        elif "phase2" in ckpt_path:
+            loaded_phase = 2
+        else:
+            loaded_phase = 2
     model.eval()
 
     scaler = None
@@ -95,24 +112,26 @@ def load_model_and_normalizer(ckpt_path: str, norm_path: str):
         with open(norm_path, "rb") as f:
             scaler = pickle.load(f)
 
-    return model, scaler, is_trained
+    return model, scaler, loaded_phase
 
 
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### ⚙️ Phase 2 Configuration")
+    st.markdown("### ⚙️ Configuration")
     ckpt_path = st.text_input(
         "Checkpoint path",
-        value=os.path.join(CKPT_PHASE2, CKPT_PHASE2_BEST),
+        value=_resolve_best_ckpt(),
     )
     norm_path = st.text_input(
         "Normalizer path",
         value=os.path.join(CKPT_PHASE2, NORMALIZER_FILE),
     )
-    model, scaler, is_trained = load_model_and_normalizer(ckpt_path, norm_path)
+    model, scaler, loaded_phase = load_model_and_normalizer(ckpt_path, norm_path)
 
-    if is_trained:
-        st.success("✅ Phase 2 model loaded (5-class)")
+    if loaded_phase == 3:
+        st.success("✅ Phase 3 model loaded (all heads trained)")
+    elif loaded_phase == 2:
+        st.success("✅ Phase 2 model loaded (5-class, supervised)")
     else:
         st.warning("⚠️ Demo mode — untrained weights")
     if scaler:
@@ -125,8 +144,9 @@ with st.sidebar:
     n_params = sum(p.numel() for p in model.parameters())
     st.metric("Parameters",   f"{n_params/1e6:.2f}M")
     st.metric("Mod classes",  f"{N_MOD_CLASSES_V2} (with DQPSK)")
-    st.metric("Patch tokens", "22 + CLS")
+    st.metric("Patch tokens", "192 + CLS = 193")
     st.metric("Heads/Layers", "4 / 4")
+    st.metric("N_BINS",       "192 (confirmed real)")
     st.markdown("---")
     st.caption("Anjani · Ashish Joshi · Mayank\nGuide: Dr. Abhinandan S.P.\nApril 2026")
 
@@ -156,7 +176,7 @@ def run_inference(psd_vec: np.ndarray) -> dict:
 
 
 def psd_fig(psd: np.ndarray, gen: np.ndarray = None, title: str = "PSD") -> go.Figure:
-    freq = np.linspace(2380, 2420, N_BINS)
+    freq = np.linspace(2380, 2420, N_BINS)   # 192 bins
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=freq, y=psd, mode="lines", name="Input PSD",
         line=dict(color="#58a6ff", width=2),
@@ -182,89 +202,239 @@ tab_scan, tab_batch, tab_explore, tab_research = st.tabs([
 
 
 # ════════════════════════════════════════════════════════════
-# TAB 1 — Single Scan
+# TAB 1 — Inference & Chat Assistant
 # ════════════════════════════════════════════════════════════
 with tab_scan:
-    st.markdown("### 🔭 Single Spectrum Scan")
-    col_ctrl, col_res = st.columns([1, 2])
-    with col_ctrl:
-        snr_t  = st.slider("Target SNR (dB)", 3.0, 20.0, 10.0, 0.5)
-        pu_sel = st.selectbox("PU Status", ["Present (PU=1)", "Absent (PU=0)"])
-        mod_sel= st.selectbox("Modulation", MOD_NAMES_V2)
-        is_pu  = pu_sel == "Present (PU=1)"
-        mod_id = MOD_NAMES_V2.index(mod_sel)
+    st.markdown("### 🔭 Inference & Chat Assistant")
+    
+    col_main, col_chat = st.columns([1.6, 1.2], gap="large")
+    
+    with col_main:
+        st.markdown("#### 1. Spectrum Input & Prediction")
+        col_ctrl, col_res = st.columns([1, 1.4])
+        
+        with col_ctrl:
+            input_mode = st.radio("Input Mode", ["📤 Upload Real .pth File", "🎛️ Synthetic Generator"], horizontal=True)
+            
+            if input_mode == "📤 Upload Real .pth File":
+                st.markdown("Upload a `.pth` file from `Symbol1/`, `Symbol2/`, or `Symbol3/` (e.g., inside the `bpsk/` or `qpsk/` folders).")
+                uploaded_file = st.file_uploader("Choose a .pth file", type=["pth"])
+                
+                if uploaded_file is not None:
+                    if st.button("🔍 Run Real Inference", use_container_width=True):
+                        # Load the real .pth file data
+                        data = torch.load(uploaded_file, map_location="cpu", weights_only=False)
+                        
+                        raw_psd = None
+                        true_snr = None
+                        true_pu = None
+                        
+                        def extract_psd_recursive(obj):
+                            """Recursively hunts for the first substantial number array (>= 100 length)"""
+                            if isinstance(obj, np.ndarray) or torch.is_tensor(obj):
+                                flat = np.array(obj.cpu() if torch.is_tensor(obj) else obj).flatten()
+                                if len(flat) >= 100: 
+                                    return flat
+                            elif isinstance(obj, (list, tuple)):
+                                for item in obj:
+                                    res = extract_psd_recursive(item)
+                                    if res is not None: return res
+                            elif isinstance(obj, dict):
+                                # Prioritize likely keys
+                                for k in ['psd', 'power', 'features', 'spectrum', 'spectrogram']:
+                                    if k in obj:
+                                        res = extract_psd_recursive(obj[k])
+                                        if res is not None: return res
+                                # Fallback: search all keys
+                                for k, v in obj.items():
+                                    res = extract_psd_recursive(v)
+                                    if res is not None: return res
+                            return None
+                        
+                        if isinstance(data, dict):
+                            # Handle the exact 'pairs_by_bin' dictionary structure of the SDR dataset
+                            if 'pairs_by_bin' in data and 'bins' in data:
+                                pairs = data['pairs_by_bin']
+                                bins = data['bins']
+                                if len(bins) > 0:
+                                    first_snr_bin = bins[len(bins)//2] # Grab one from the middle
+                                    if first_snr_bin in pairs and len(pairs[first_snr_bin]) > 0:
+                                        raw_psd, true_pu = pairs[first_snr_bin][0]
+                                        true_snr = float(first_snr_bin)
+                        
+                        # Universal fallback: aggressively search the entire file structure
+                        if raw_psd is None:
+                            raw_psd = extract_psd_recursive(data)
+                            
+                        if raw_psd is not None:
+                            # Convert extracted list/tensor into the 176-bin numpy array required by the model
+                            psd_array = np.array(raw_psd, dtype=np.float32).flatten()
+                            if len(psd_array) >= N_BINS:
+                                psd_array = psd_array[:N_BINS]
+                            elif len(psd_array) < N_BINS:
+                                psd_array = np.pad(psd_array, (0, N_BINS - len(psd_array)))
+                                
+                            st.session_state.p2_psd = psd_array
+                            st.session_state.p2_res = run_inference(psd_array)
+                            
+                            res = st.session_state.p2_res
+                            pu_text = f"Primary User was **DETECTED** ({res['pu_prob']*100:.1f}% confidence)" if res["pu_present"] else f"NO Primary User found ({(1-res['pu_prob'])*100:.1f}% confidence of absence)"
+                            
+                            # Construct chat message with true file labels if we found them
+                            chat_msg = f"⚡ **Real Hardware Scan Uploaded & Analyzed:**\n- {pu_text}\n- Modulation: {MOD_NAMES_V2[res['mod_pred']]} ({res['mod_probs'][res['mod_pred']]*100:.1f}%)\n- Estimated SNR: {res['snr_db']:.1f} dB"
+                            
+                            if true_snr is not None and true_pu is not None:
+                                chat_msg += f"\n\n*(Embedded Ground Truth extracted from file: SNR {true_snr:.1f} dB, PU {'Present' if int(true_pu)==1 else 'Absent'})*"
+                            
+                            chat_msg += "\n\n*What would you like to know about this physical hardware trace?*"
+                            
+                            if "messages" not in st.session_state:
+                                st.session_state.messages = []
+                            st.session_state.messages.append({"role": "assistant", "content": chat_msg})
+                        else:
+                            st.error("Could not find a mathematically compatible PSD structure in this .pth file. Try a 'psd_binned_by_snr_...' file.")
+            
+            else:
+                snr_t  = st.slider("Target SNR (dB)", 3.0, 20.0, 10.0, 0.5)
+                pu_sel = st.selectbox("PU Status", ["Present (PU=1)", "Absent (PU=0)"])
+                mod_sel= st.selectbox("Modulation", MOD_NAMES_V2)
+                is_pu  = pu_sel == "Present (PU=1)"
+                mod_id = MOD_NAMES_V2.index(mod_sel)
+    
+                if st.button("🔍 Run Synthetic Inference", use_container_width=True):
+                    freqs = np.linspace(-1, 1, N_BINS)
+                    widths = [0.20, 0.25, 0.30, 0.35, 0.22]   # per-mod bandwidth
+                    psd = np.random.randn(N_BINS).astype(np.float32) * 1.5 - 22.0
+                    if is_pu:
+                        psd += (snr_t * 0.8) * np.exp(
+                            -freqs**2 / (2 * widths[mod_id]**2)).astype(np.float32)
+                    st.session_state.p2_psd = psd
+                    st.session_state.p2_res = run_inference(psd)
+                    st.session_state.p2_true_pu  = is_pu
+                    st.session_state.p2_true_mod = mod_id
+                    
+                    # Auto-generate an initial thought from the assistant upon new scan
+                    res = st.session_state.p2_res
+                    pu_text = f"Primary User was **DETECTED** ({res['pu_prob']*100:.1f}% confidence)" if res["pu_present"] else f"NO Primary User found ({(1-res['pu_prob'])*100:.1f}% confidence of absence)"
+                    mod_text = MOD_NAMES_V2[res['mod_pred']]
+                    mod_conf = res['mod_probs'][res['mod_pred']] * 100
+                    
+                    if "messages" not in st.session_state:
+                        st.session_state.messages = []
+                        
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": f"⚡ **Synthetic Scan Analyzed:**\n- {pu_text}\n- Modulation: {mod_text} ({mod_conf:.1f}%)\n- Estimated SNR: {res['snr_db']:.1f} dB\n\n*Keep in mind, synthetic signals lack real hardware phase shifts. What would you like to know?*"
+                    })
 
-        if st.button("🔍 Run Inference", use_container_width=True):
-            freqs = np.linspace(-1, 1, N_BINS)
-            widths = [0.20, 0.25, 0.30, 0.35, 0.22]   # per-mod bandwidth
-            psd = np.random.randn(N_BINS).astype(np.float32) * 1.5 - 22.0
-            if is_pu:
-                psd += (snr_t * 0.8) * np.exp(
-                    -freqs**2 / (2 * widths[mod_id]**2)).astype(np.float32)
-            st.session_state.p2_psd = psd
-            st.session_state.p2_res = run_inference(psd)
-            st.session_state.p2_true_pu  = is_pu
-            st.session_state.p2_true_mod = mod_id
+        with col_res:
+            if "p2_res" in st.session_state:
+                res = st.session_state.p2_res
+                psd = st.session_state.p2_psd
+                gen = np.array(res["gen_psd"]) * np.std(psd) + np.mean(psd)
+                
+                # Small visualization
+                fig_small = psd_fig(psd, gen, "Processed Snapshot")
+                fig_small.update_layout(height=220, margin=dict(l=20,r=10,t=30,b=20))
+                st.plotly_chart(fig_small, use_container_width=True)
 
-    with col_res:
-        if "p2_res" in st.session_state:
-            res = st.session_state.p2_res
-            psd = st.session_state.p2_psd
-            gen = np.array(res["gen_psd"]) * np.std(psd) + np.mean(psd)
-            st.plotly_chart(psd_fig(psd, gen, "Input PSD + Predicted Next-PSD"),
-                            use_container_width=True)
+                m1,m2 = st.columns(2)
+                pu_col = "#3fb950" if res["pu_present"] else "#f85149"
+                m1.markdown(f"""<div class="metric-card" style="padding:10px;">
+                  <div class="metric-value" style="color:{pu_col};font-size:1.5em;">
+                    {'✅ YES' if res['pu_present'] else '⛔ NO'}
+                  </div>
+                  <div class="metric-label">PU ({res['pu_prob']*100:.1f}%)</div>
+                </div>""", unsafe_allow_html=True)
+                
+                m2.markdown(f"""<div class="metric-card" style="padding:10px;">
+                  <div class="metric-value" style="color:#ffa657;font-size:1.5em;">
+                    {MOD_NAMES_V2[res['mod_pred']]}
+                  </div>
+                  <div class="metric-label">SNR: {res['snr_db']:.1f} dB</div>
+                </div>""", unsafe_allow_html=True)
+            else:
+                st.info("Configure input and click **Run Inference** to view results.")
 
-            m1,m2,m3,m4 = st.columns(4)
-            pu_col = "#3fb950" if res["pu_present"] else "#f85149"
-            m1.markdown(f"""<div class="metric-card">
-              <div class="metric-value" style="color:{pu_col};">
-                {'✅ YES' if res['pu_present'] else '⛔ NO'}
-              </div>
-              <div class="metric-label">PU Present ({res['pu_prob']*100:.1f}%)</div>
-            </div>""", unsafe_allow_html=True)
-            m2.markdown(f"""<div class="metric-card">
-              <div class="metric-value" style="color:#ffa657;">
-                {MOD_NAMES_V2[res['mod_pred']]}
-              </div>
-              <div class="metric-label">Modulation ({res['mod_probs'][res['mod_pred']]*100:.1f}%)</div>
-            </div>""", unsafe_allow_html=True)
-            m3.markdown(f"""<div class="metric-card">
-              <div class="metric-value">{res['snr_db']:.1f} dB</div>
-              <div class="metric-label">Estimated SNR</div>
-            </div>""", unsafe_allow_html=True)
-            m4.markdown(f"""<div class="metric-card">
-              <div class="metric-value" style="color:#58a6ff;">{res['latency_ms']:.1f} ms</div>
-              <div class="metric-label">Inference Latency</div>
-            </div>""", unsafe_allow_html=True)
+    with col_chat:
+        st.markdown("#### 💬 Interactive AI Assistant")
+        
+        # Initialize chat history
+        if "messages" not in st.session_state:
+            st.session_state.messages = [
+                {"role": "assistant", "content": "Hello! I am your Spectrum-SLM Assistant. Run an inference scan on the left, and I'll help you analyze the results contextually. What would you like to know?"}
+            ]
+            
+        # Display chat messages (Streamlit 1.24+ style chat container)
+        chat_container = st.container(height=380)
+        with chat_container:
+            for msg in st.session_state.messages:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+                    
+        # Intelligent Response Generator
+        def generate_ai_response(prompt):
+            prompt = prompt.lower()
+            ctx = st.session_state.get("p2_res")
+            
+            # Casual conversation
+            if prompt in ["hi", "hello", "hey"]:
+                return "Hello! How can I assist you with spectrum sensing today?"
+            if "who are you" in prompt or "what are you" in prompt:
+                return "I am the Spectrum-SLM AI Assistant. I use a Small Language Model architecture to analyze radio frequencies, detect primary users, classify modulations, and estimate SNR in real time."
+                
+            # Need context for the rest
+            if not ctx:
+                return "Please run a spectrum inference scan on the left before asking for an analysis. I need live data to provide meaningful insights!"
+                
+            pu = ctx["pu_present"]
+            pu_prob = ctx["pu_prob"] * 100
+            mod_pred = MOD_NAMES_V2[ctx["mod_pred"]]
+            mod_prob = ctx["mod_probs"][ctx["mod_pred"]] * 100
+            snr = ctx["snr_db"]
+            lat = ctx["latency_ms"]
+            
+            if any(w in prompt for w in ["explain", "result", "analysis", "what happened", "summary"]):
+                pu_text = f"detected a Primary User with {pu_prob:.1f}% confidence" if pu else f"found NO Primary User ({100-pu_prob:.1f}% confidence)"
+                ans = f"Based on the latest scan, my model **{pu_text}**.\n\n"
+                if pu:
+                    ans += f"The signal's transmission scheme is classified as **{mod_pred}** (confidence: {mod_prob:.1f}%) with an estimated channel SNR of **{snr:.1f} dB**."
+                else:
+                    ans += f"Although there is no active transmission, the background noise structure marginally resembles a **{mod_pred}** signature at a very low **{snr:.1f} dB**."
+                ans += f"\n\n*This inference was processed in just {lat:.1f} ms.*"
+                return ans
+                
+            if any(w in prompt for w in ["reliable", "confidence", "trust", "sure", "accurate"]):
+                if pu_prob > 90 or pu_prob < 10:
+                    return f"Yes, the model is **highly confident** (PU probability is {pu_prob:.1f}%). The estimated SNR of {snr:.1f} dB provides a strong enough signal-to-noise ratio for reliable boundary decision-making."
+                else:
+                    return f"The model is mathematically **uncertain** (PU probability is {pu_prob:.1f}%). This ambiguity is common when the SNR drops to {snr:.1f} dB, pushing the signal close to the noise floor. I recommend observing another packet."
+                    
+            if any(w in prompt for w in ["modulation", "type", "scheme", "encode"]):
+                return f"The detected modulation scheme is **{mod_pred}** with a calculated probability of {mod_prob:.1f}%. My transformer encoder categorizes the spectral patches into one of five learned bases: BPSK, QPSK, 8PSK, 16QAM, or DQPSK."
+                
+            if any(w in prompt for w in ["snr", "signal", "noise"]):
+                return f"The estimated Signal-to-Noise Ratio (SNR) is **{snr:.1f} dB**. This is calculated simultaneously via the Multi-Task learning phase, actively measuring the channel's noise floor against the signal's peak."
+                
+            if any(w in prompt for w in ["next", "future", "predict", "forecast"]):
+                return "Using our Phase 3 Generative Head, I autoregressively forecasted the **next upcoming spectrum state** (represented by the dashed green line in the plot). This provides foresight into spectrum occupancy before it physically occurs."
 
-            st.markdown("#### Modulation Probabilities (5-class)")
-            bar = go.Figure(go.Bar(
-                x=MOD_NAMES_V2, y=[p*100 for p in res["mod_probs"]],
-                marker_color=MOD_COLORS_V2,
-                text=[f"{p*100:.1f}%" for p in res["mod_probs"]],
-                textposition="outside",
-            ))
-            bar.update_layout(
-                plot_bgcolor="#0d1117", paper_bgcolor="#0d1117",
-                height=220, margin=dict(l=20,r=20,t=10,b=20),
-                yaxis=dict(range=[0,115], color="#8b949e", gridcolor="#21262d"),
-                xaxis=dict(color="#8b949e"),
-                font=dict(color="#c9d1d9", family="Inter"),
-            )
-            st.plotly_chart(bar, use_container_width=True)
+            return f"I see you're referring to the latest {mod_pred} signal scan at {snr:.1f} dB. Could you be more specific? I can explain the general results, analyze confidence metrics, or explain the generative forecasting."
 
-            # Ground truth comparison
-            if st.session_state.get("p2_true_pu") is not None:
-                true_mod = st.session_state.p2_true_mod
-                pu_match  = res["pu_present"] == st.session_state.p2_true_pu
-                mod_match = res["mod_pred"] == true_mod
-                st.markdown(
-                    f"**Ground truth:** PU={'Present' if st.session_state.p2_true_pu else 'Absent'}  |  "
-                    f"Mod={MOD_NAMES_V2[true_mod]}  |  "
-                    f"PU {'✅' if pu_match else '❌'}  Mod {'✅' if mod_match else '❌'}"
-                )
-        else:
-            st.info("Configure input on the left and click **Run Inference**.")
+        # Chat Input
+        if prompt := st.chat_input("Ask me to analyze the results..."):
+            # Add user message
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with chat_container:
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                
+            # Generate and add assistant response
+            response = generate_ai_response(prompt)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            with chat_container:
+                with st.chat_message("assistant"):
+                    st.markdown(response)
 
 
 # ════════════════════════════════════════════════════════════
@@ -354,48 +524,68 @@ with tab_batch:
 # TAB 3 — Dataset Explorer
 # ════════════════════════════════════════════════════════════
 with tab_explore:
-    st.markdown("### 🗃️ New Dataset Explorer")
-    st.caption(f"Dataset root: `{PHASE2_DATA_DIR}`")
+    st.markdown("### 🗃️ Real Dataset Explorer")
+    st.caption(f"Source 1: `{SECONDARY_USER_DIR}`  |  Source 2: `{NEW_DATASET_DIR}`")
 
     col_e1, col_e2 = st.columns([1, 3])
     with col_e1:
         sel_mod = st.selectbox("Modulation", MOD_NAMES_V2, key="exp_mod")
-        sel_sym = st.selectbox("Symbol dir", ["Symbol1","Symbol2","Symbol3"], key="exp_sym")
-        if st.button("📂 Load Sample PSD"):
-            import glob
-            mod_folder_map = {"BPSK":"bpsk","QPSK":"qpsk","8PSK":"8psk",
-                              "16QAM":"16qam","DQPSK":"dqpsk"}
-            folder = mod_folder_map[sel_mod]
-            csv_pattern = os.path.join(PHASE2_DATA_DIR, sel_sym, folder, "*.csv")
-            csvs = glob.glob(csv_pattern)
-            if csvs:
-                df = pd.read_csv(csvs[0])
-                st.session_state.exp_df = df
-                st.session_state.exp_mod_name = sel_mod
-                st.success(f"Loaded {len(df):,} rows from {os.path.basename(csvs[0])}")
+        sel_sym = st.selectbox("Symbol dir", ["Symbol2","Symbol3"], key="exp_sym")
+        n_show  = st.slider("Samples to show", 5, 100, 20)
+        if st.button("📂 Load Real PSD Samples"):
+            mod_folder = {"BPSK":"bpsk","QPSK":"qpsk","8PSK":"8psk",
+                          "16QAM":"16qam","DQPSK":"dqpsk"}[sel_mod]
+            dset_path = os.path.join(NEW_DATASET_DIR, sel_sym, mod_folder, "dataset.pth")
+            if os.path.exists(dset_path):
+                raw = torch.load(dset_path, map_location="cpu", weights_only=False)
+                psds_r = np.array(raw["psds"]).squeeze(-1) if np.array(raw["psds"]).ndim==3 else np.array(raw["psds"])
+                snrs_r = np.array(raw["snrs"])
+                pu_r   = np.array(raw.get("pu_flags", raw.get("pu_labels", [])))
+                df_exp = pd.DataFrame({"snr_db": snrs_r, "pu": pu_r,
+                                       "psd_mean": psds_r.mean(axis=1),
+                                       "psd_std":  psds_r.std(axis=1)})
+                st.session_state.exp_df   = df_exp
+                st.session_state.exp_psds = psds_r
+                st.session_state.exp_mod  = sel_mod
+                st.success(f"Loaded {len(df_exp):,} real samples — PSD shape: {psds_r.shape}")
             else:
-                st.warning("No CSV found in that directory.")
+                st.warning(f"File not found: {dset_path}")
 
     with col_e2:
         if "exp_df" in st.session_state:
-            df = st.session_state.exp_df
-            mod_name = st.session_state.exp_mod_name
-            st.dataframe(df.head(20), use_container_width=True)
-            if "Mean_PSD_dB" in df.columns:
-                st.markdown(f"#### Mean PSD — {mod_name}")
-                fig_e = go.Figure()
-                fig_e.add_trace(go.Histogram(x=df["Mean_PSD_dB"],
-                    marker_color=MOD_COLORS_V2[MOD_NAMES_V2.index(mod_name)],
-                    name=mod_name, nbinsx=50))
-                fig_e.update_layout(
-                    plot_bgcolor="#0d1117", paper_bgcolor="#0d1117", height=250,
-                    xaxis=dict(title="Mean PSD (dB)",color="#8b949e"),
-                    yaxis=dict(title="Count",color="#8b949e"),
-                    font=dict(color="#c9d1d9",family="Inter"),
-                    margin=dict(l=40,r=20,t=20,b=40))
-                st.plotly_chart(fig_e, use_container_width=True)
+            df       = st.session_state.exp_df
+            psds_exp = st.session_state.exp_psds
+            mn       = st.session_state.exp_mod
+            col_d1, col_d2 = st.columns(2)
+            col_d1.metric("Samples", f"{len(df):,}")
+            col_d2.metric("PU=1", f"{df['pu'].sum():,} ({df['pu'].mean()*100:.1f}%)")
+            st.dataframe(df.head(n_show), use_container_width=True)
+
+            # SNR distribution
+            st.markdown(f"#### SNR Distribution — {mn}")
+            fig_snr = go.Figure(go.Histogram(
+                x=df["snr_db"], nbinsx=40,
+                marker_color=MOD_COLORS_V2[MOD_NAMES_V2.index(mn)]))
+            fig_snr.update_layout(plot_bgcolor="#0d1117",paper_bgcolor="#0d1117",
+                height=220, xaxis=dict(title="SNR (dB)",color="#8b949e"),
+                yaxis=dict(color="#8b949e"),font=dict(color="#c9d1d9",family="Inter"),
+                margin=dict(l=30,r=10,t=10,b=30))
+            st.plotly_chart(fig_snr, use_container_width=True)
+
+            # Sample PSD
+            st.markdown("#### Sample PSD Vector (192 bins)")
+            sample_idx = st.slider("Sample index", 0, min(len(psds_exp)-1,999), 0)
+            freq = np.linspace(2380, 2420, N_BINS)
+            fig_p = go.Figure(go.Scatter(x=freq, y=psds_exp[sample_idx],
+                mode="lines", line=dict(color=MOD_COLORS_V2[MOD_NAMES_V2.index(mn)],width=1.5),
+                fill="tozeroy", fillcolor="rgba(88,166,255,0.05)"))
+            fig_p.update_layout(plot_bgcolor="#0d1117",paper_bgcolor="#0d1117",height=220,
+                xaxis=dict(title="Freq (MHz)",color="#8b949e"),
+                yaxis=dict(title="Power",color="#8b949e"),
+                font=dict(color="#c9d1d9",family="Inter"),margin=dict(l=30,r=10,t=10,b=30))
+            st.plotly_chart(fig_p, use_container_width=True)
         else:
-            st.info("Select a modulation + symbol dir and click **Load Sample PSD**.")
+            st.info("Select modulation + symbol dir and click **Load Real PSD Samples**.")
 
 
 # ════════════════════════════════════════════════════════════

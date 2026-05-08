@@ -1,60 +1,31 @@
-# Spectrum-SLM .gitignore
-
-# ── Large data files (SDR data) ──────────────────────────────────────────────
+# ─── Large data files (too big for GitHub) ────────────────────────────────────
 *.pth
-*.pkl
 *.bin
+*.pkl
+
+# ─── Dataset folders ──────────────────────────────────────────────────────────
+files-20260414T094743Z-3-001/
+files-20260411T185728Z-3-001/
+Secondary_User/
+GeneratedDatasets_realistic/
+
+# ─── Checkpoints (download from Kaggle instead) ───────────────────────────────
+checkpoints/
+slm_checkpoints/
+*.pt
 *.onnx
 
-# Checkpoint directory (can be large)
-slm_checkpoints/
-
-# ── Python ────────────────────────────────────────────────────────────────────
+# ─── Python cache ─────────────────────────────────────────────────────────────
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
-*.pyd
-.Python
-*.egg
-*.egg-info/
-dist/
-build/
-.eggs/
-*.so
-
-# ── Virtual environments ──────────────────────────────────────────────────────
-venv/
-.venv/
-env/
-.env/
-
-# ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
-*.ipynb
 
-# ── IDE ───────────────────────────────────────────────────────────────────────
-.vscode/
-.idea/
-*.swp
-*.swo
+# ─── OS / editor ──────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
 
-# ── Outputs ───────────────────────────────────────────────────────────────────
-metrics.json
-logs/
-runs/
-wandb/
-
-# BUT keep CSV files (they are small enough for git)
-!*.csv
-
-# Ignore local LaTeX documentation files
-*.tex
-*.aux
+# ─── Logs / temp ──────────────────────────────────────────────────────────────
 *.log
-*.out
-*.nav
-*.snm
-*.toc
-*.pdf

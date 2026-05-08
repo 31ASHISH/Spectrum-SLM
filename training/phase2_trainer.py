@@ -173,7 +173,7 @@ def train_phase2(
     # ── 2. Model ──────────────────────────────────────────────────────────────
     model = SpectrumSLM(
         n_bins          = N_BINS,
-        patch_size      = 8,
+        patch_size      = 1,           # ← each bin = 1 token (192 tokens)
         d_model         = 128,
         nhead           = 4,
         num_layers      = 4,

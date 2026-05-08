@@ -1,0 +1,25 @@
+=== Spectrum-SLM Dataset Structure ===
+
+Total samples : 132,240
+PSD shape     : (132240, 192)
+Bin count     : 192 (confirmed)
+NaN count     : 0
+SNR range     : 0.6 – 86.0 dB
+
+Modulation breakdown:
+  BPSK    :  45,990
+  QPSK    :  34,680
+  8PSK    :  13,745
+  16QAM   :  23,090
+  DQPSK   :  14,735
+
+SNR bin counts (±1 dB):
+    4 dB :    549
+    6 dB : 20,481
+    8 dB : 48,197
+   10 dB : 24,250
+   12 dB : 32,902
+   14 dB :  4,944
+   16 dB :    540
+   18 dB :    119
+   20 dB :     67

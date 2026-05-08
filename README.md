@@ -1,161 +1,154 @@
-# Spectrum-SLM 🧠📡
-> **A Small Language Model for Cognitive Radio Spectrum Sensing**
+# Spectrum-SLM — Cognitive Radio Spectrum Sensing
 
-[![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://python.org)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)](https://pytorch.org)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.32%2B-red)](https://streamlit.io)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+> A production-grade Transformer-based Spectrum Language Model (SLM) for real-time cognitive radio spectrum sensing using Software-Defined Radio (SDR) data.
 
-**Authors:** Anjani · Ashish Joshi · Mayank | **Guide:** Dr. Abhinandan S.P. | **IIT Palakkad** | March 2026
+**Authors:** Anjani · Ashish Joshi · Mayank  
+**Guide:** Dr. Abhinandan S.P.  
+**Date:** May 2026
 
 ---
 
-## 📌 Overview
-
-Spectrum-SLM is a GPT-like **Small Language Model (~1M parameters)** that treats RF Power Spectral Density (PSD) vectors like sequences of tokens. It is trained on **152K+ real-world measurements** from an **ADALM-Pluto SDR** at 2.4 GHz and performs **four tasks simultaneously**:
-
-| Task | Output | Target Performance |
-|------|--------|--------------------|
-| PU Detection | Binary (0/1) | **96–98% accuracy** |
-| Low-SNR Detection | Binary @ <8 dB | **90–94% accuracy** |
-| Modulation Classification | BPSK/QPSK/8PSK/16QAM | **92–95% accuracy** |
-| SNR Estimation | Regression (dB) | **MAE < 1.5 dB** |
-
----
-
-## 🧠 Architecture
+## Architecture
 
 ```
-PSD Vector (176 bins)
-      ↓
-Patch Embedding: 176 → 22 spectral tokens (patch size = 8)
-      ↓
-Frequency-Aware Positional Encoding (learnable + sinusoidal blend)
-      ↓
-Transformer Encoder: 4 layers, 4 heads, d_model=128, d_ff=512
-      ↓ [CLS token]
-┌────────────────────────────────────────────────┐
-│  PU Head  │  Mod Head  │  SNR Head  │  Gen Head │
-│ (Binary)  │  (4-class) │ (Regress.) │ (176-dim) │
-└────────────────────────────────────────────────┘
+PSD (192,) → PatchEmbedding (patch_size=1) → 192 Tokens
++ CLS Token → 193 Tokens
+→ FrequencyAwarePositionalEncoding (learned + sinusoidal blend)
+→ TransformerEncoder (4 layers × 4 heads × d=128, Pre-LN)
+→ CLS Feature (128-d) → Multi-task Heads:
+    PU Detection  : 128→64→2       (Binary: PU present/absent)
+    Modulation    : 128→64→5       (BPSK / QPSK / 8PSK / 16QAM / DQPSK)
+    SNR Estimation: 128→64→1       (Regression, dB)
 ```
 
-**~1M parameters** — edge-deployable with ONNX export.
+- **Parameters:** ~943K  
+- **Input:** 192 frequency bins (real SDR PSD vectors)  
+- **Token sequence:** 193 (192 bin-tokens + 1 CLS)
 
 ---
 
-## 📁 Project Structure
+## Dataset
+
+Real SDR recordings. **No synthetic data used for training.**
+
+| Modulation | Samples |
+|-----------|---------|
+| BPSK      | 45,990  |
+| QPSK      | 34,680  |
+| 8PSK      | 13,745  |
+| 16QAM     | 23,090  |
+| DQPSK     | 14,735  |
+| **Total** | **132,240** |
+
+Data is loaded from two sources:
+- `Secondary_User/` — binned format `.pth` files
+- `files-20260414T094743Z-3-001/Symbol2/, Symbol3/` — log format `.pth` files
+
+> ⚠️ Data files are NOT included in this repo (too large for GitHub).  
+> Download them separately and place in the correct directories.
+
+---
+
+## Project Structure
 
 ```
 SDR_Data/
-├── spectrum_slm_model.py       # PyTorch model (PatchEmbed, Transformer, all heads, losses)
-├── spectrum_slm_dataset.py     # Data pipeline (PTH/CSV loaders, augmentation, DataLoaders)
-├── spectrum_slm_train.py       # 3-phase training loop + evaluation + ONNX export
-├── app.py                      # Streamlit interactive web demo
-├── requirements.txt            # Python dependencies
-│
-├── Primary_User/               # GNU Radio transmitter setup (SDR hardware)
-├── Secondary_User/             # SDR receiver PSD measurements
-│   ├── Symbol1_Modulation/     # Main dataset (76,560 rows, Output.csv)
-│   ├── Symbol2_Results/        # 44,824 rows
-│   ├── Symbol3_Results/        # 31,594 rows
-│   └── psd_binned_by_snr_*.pth # Full 176-bin PSD vectors per modulation
-└── GeneratedDatasets_realistic/
+├── config.py                    # Central config (N_BINS=192, all paths)
+├── spectrum_slm_model.py        # Transformer model + loss functions
+├── spectrum_slm_dataset.py      # Dataset pipeline (normalize, split, augment)
+├── spectrum_slm_train.py        # Phase 1 & 2 training + evaluation
+├── app_phase2.py                # Streamlit dashboard
+├── verify_all.py                # End-to-end pipeline verification
+├── dataset_report.json          # Auto-generated dataset statistics
+├── dataset_statistics.csv       # Per-modulation statistics
+├── dataset_structure.txt        # Dataset structure summary
+├── dataset/
+│   ├── loader.py                # Unified PTH loader (binned + log formats)
+│   └── analysis.py              # Dataset analysis script
+└── training/
+    ├── train_phase1.py          # Phase 1: Masked Spectrum Modelling
+    ├── train_phase2.py          # Phase 2: Supervised Multi-task
+    ├── run_3_phases.py          # Run all phases in sequence
+    └── export_onnx.py           # ONNX export + benchmark
 ```
 
 ---
 
-## 🚀 Quick Start
+## Three-Phase Training
 
-### 1. Install dependencies
+| Phase | Method | Purpose |
+|-------|--------|---------|
+| **Phase 1** | Masked Spectrum Modelling (MSM) | Self-supervised pre-training on real spectra |
+| **Phase 2** | Supervised Multi-task | PU + Modulation + SNR joint learning |
+| **Phase 3** | *Skipped* | No real temporal sequence data exists |
+
+### Loss Functions
+- **PU:** Focal Loss (γ=2) + Kendall uncertainty weighting  
+- **Mod:** CrossEntropy  
+- **SNR:** HuberLoss (robust to outliers)
+
+---
+
+## Quick Start
+
+### Install
 ```bash
-pip install -r requirements.txt
+pip install torch numpy pandas scikit-learn streamlit plotly scipy tqdm
 ```
 
-### 2. Run the Streamlit web app (works without real SDR data!)
+### Verify Pipeline
 ```bash
-streamlit run app.py
+python verify_all.py
 ```
 
-### 3. Train the model (demo mode — synthetic data, no SDR files needed)
+### Run Training
 ```bash
-python spectrum_slm_train.py --synthetic --phase 2 --epochs_p1 10 --epochs_p2 20
+# Phase 1 (MSM pre-training)
+python training/train_phase1.py --epochs 30
+
+# Phase 2 (supervised fine-tuning)
+python training/train_phase2.py --epochs 50
+
+# Or run both in sequence
+python training/run_3_phases.py
 ```
 
-### 4. Train on real SDR data
+### Export ONNX
 ```bash
-python spectrum_slm_train.py \
-  --data_dir . \
-  --phase 2 \
-  --epochs_p1 30 \
-  --epochs_p2 50 \
-  --batch_size 64
+python training/export_onnx.py
 ```
 
-### 5. Export to ONNX (edge deployment)
+### Run Dashboard
 ```bash
-python spectrum_slm_train.py --synthetic --phase 2 --export_onnx
+streamlit run app_phase2.py
 ```
 
 ---
 
-## 📊 Three-Phase Training
+## Running on Kaggle
 
-| Phase | Method | Loss | Data |
-|-------|--------|------|------|
-| **1** Pre-training | Masked Spectrum Modelling (MSM) | MSE (masked patches) | All (no labels) |
-| **2** Fine-tuning | Supervised Multi-task | α·FocalLoss + β·CE + γ·MSE | Labelled |
-| **3** Generative | Autoregressive Next-PSD | MSE | Sequences |
+1. Upload `Secondary_User/` and `files-20260414T094743Z-3-001/` as a Kaggle Dataset
+2. Upload all `.py` files as a second Kaggle Dataset
+3. Create a GPU notebook and follow the guide in `KAGGLE_GUIDE.md`
 
----
-
-## 🔬 Research Novelty
-
-1. **First SLM for Spectrum Sensing** — no prior GPT-style model on PSD data
-2. **Masked Spectrum Modelling** — novel self-supervised RF pre-training
-3. **Multi-task Spectrum Intelligence** — detection + classification + estimation in one model
-4. **Generative PSD Forecasting** — autoregressive spectrum occupancy prediction
-5. **Real Hardware Dataset** — ADALM-Pluto SDR, not simulation
-
-**Target venues:** IEEE TCCN · IEEE DySPAN · IEEE GLOBECOM/ICC · IEEE WCL
+**Estimated GPU time:** ~85 minutes (T4) · ~58 minutes (P100)
 
 ---
 
-## 💬 Streamlit Demo Features
+## Evaluation Metrics
 
-- **AI Chat Tab** — Ask questions about spectrum sensing, run live scans via natural language
-- **Single Scan Tab** — Upload CSV or generate synthetic PSD, see visualised predictions
-- **Batch Analysis Tab** — Run 100–2000 synthetic samples, see per-SNR-bin accuracy chart
-- **Research Tab** — Ablation study table and comparison vs traditional ML
-
----
-
-## 📡 Hardware Setup
-
-| Parameter | Value |
-|-----------|-------|
-| SDR Device | ADALM-Pluto |
-| Frequency | 2.4 GHz (ISM band) |
-| Sample Rate | 1.024 MHz |
-| FFT Size | 1024-point (Blackman-Harris) |
-| PSD Bins | 176 frequency bins per snapshot |
-| Modulations | BPSK, QPSK, 8PSK, 16QAM |
-| SNR Range | 3–20 dB |
+- **PU Detection:** Accuracy, F1, ROC-AUC, PR-AUC, per-SNR-bin breakdown  
+- **Modulation:** Accuracy, macro-F1, per-class F1  
+- **SNR:** MAE (dB), RMSE, R²  
+- **Low-SNR Robustness:** Accuracy and F1 for SNR < 8 dB
 
 ---
 
-## 📈 Expected Results vs Baseline
+## Deployment
 
-| Task | VotingClassifier | Spectrum-SLM | Improvement |
-|------|------------------|-----------:|:-----------:|
-| PU Detection | 92–95% | **96–98%** | +3–6% |
-| Low-SNR (<8 dB) | 80–85% | **90–94%** | +8–12% |
-| Modulation | 85–88% | **92–95%** | +7–10% |
-| SNR MAE | N/A | **< 1.5 dB** | New capability |
-| Generative | ❌ | ✅ | New capability |
-
----
-
-## 📜 License
-
-MIT License — see [LICENSE](LICENSE)
+The model exports to **ONNX** for edge deployment on SDR hardware:
+```python
+from training.export_onnx import export_onnx
+export_onnx("checkpoints/phase2/slm_phase2_best.pt", "spectrum_slm.onnx")
+```
+Typical latency: **< 5ms per sample** on CPU.
