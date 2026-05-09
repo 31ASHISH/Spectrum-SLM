@@ -122,30 +122,54 @@ def load_binned_pth(path: str, mod_id: int = -1):
 
 def load_log_pth(path: str, mod_id: int = -1):
     data = _safe_load(path)
+
     if data is None:
         return _empty()
+
     if not isinstance(data, dict) or "psds" not in data:
         print(f"  [SKIP] Not log format: {os.path.basename(path)}")
         return _empty()
 
-    psds_raw = np.array(data["psds"], dtype=np.float32)
-    snrs_raw = np.array(data["snrs"], dtype=np.float32)
-    pu_key   = "pu_flags" if "pu_flags" in data else "pu_labels"
-    pu_raw   = np.array(data[pu_key], dtype=np.int64)
+    try:
+        # Convert lists safely
+        psds_raw = np.array(data["psds"], dtype=np.float32)
+        snrs_raw = np.array(data["snrs"], dtype=np.float32)
 
-    # (N, 192, 1) → (N, 192)
-    if psds_raw.ndim == 3 and psds_raw.shape[2] == 1:
-        psds_raw = psds_raw.squeeze(-1)
+        pu_key = "pu_flags" if "pu_flags" in data else "pu_labels"
+        pu_raw = np.array(data[pu_key], dtype=np.int64)
 
-    if psds_raw.ndim == 2 and psds_raw.shape[1] != N_BINS:
-        print(f"  [SKIP] Wrong bins {psds_raw.shape[1]}: {os.path.basename(path)}")
-        return _empty()
+        # Handle list/object dtype — stack each sample individually
+        if psds_raw.dtype == object:
+            psds_raw = np.stack([
+                np.array(x, dtype=np.float32).flatten()
+                for x in data["psds"]
+            ])
 
-    n = len(psds_raw)
-    return (psds_raw,
+        # Remove trailing singleton dim: (N, 192, 1) → (N, 192)
+        if psds_raw.ndim == 3 and psds_raw.shape[-1] == 1:
+            psds_raw = psds_raw.squeeze(-1)
+
+        # Validate shape
+        if psds_raw.ndim != 2:
+            print(f"  [SKIP] Invalid PSD shape {psds_raw.shape}: {os.path.basename(path)}")
+            return _empty()
+
+        if psds_raw.shape[1] != N_BINS:
+            print(f"  [SKIP] Wrong bins {psds_raw.shape[1]}: {os.path.basename(path)}")
+            return _empty()
+
+        n = len(psds_raw)
+        return (
+            psds_raw,
             pu_raw,
             np.full(n, mod_id, dtype=np.int64),
-            snrs_raw)
+            snrs_raw,
+        )
+
+    except Exception as e:
+        print(f"  [SKIP] Failed loading {os.path.basename(path)} — {e}")
+        return _empty()
+
 
 
 # ---------------------------------------------------------------------------
