@@ -145,7 +145,7 @@ def run_phase2(
     print(f"  History → {hist_path}")
 
     # Save last checkpoint
-    torch.save(model.state_dict(), os.path.join(save_dir, CKPT_PHASE2_LAST))
+    torch.save(model.state_dict(), os.path.join(save_dir, "slm_phase2_last.pt"))
 
     # Load best and evaluate
     best_ckpt = os.path.join(save_dir, CKPT_PHASE2_BEST)
