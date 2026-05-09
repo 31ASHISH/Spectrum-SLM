@@ -3,7 +3,7 @@ training/run_3_phases.py
 ========================
 Orchestrates all training phases.
 
-Phase 3 is SKIPPED — no real temporal sequence data exists.
+Phase 3: Generative AutoEncoder — trains gen_head as a signal reconstructor.
 
 Authors : Anjani, Ashish Joshi, Mayank
 Dated   : May 2026
@@ -25,6 +25,7 @@ from spectrum_slm_dataset import build_dataloaders
 from spectrum_slm_train   import get_device, load_checkpoint
 from training.train_phase1 import run_phase1
 from training.train_phase2 import run_phase2
+from training.train_phase3 import run_phase3
 
 
 def run_all_phases(
@@ -37,7 +38,7 @@ def run_all_phases(
     device = get_device()
     print(f"\n{'='*60}")
     print(f"  Spectrum-SLM — 3-Phase Training  (device={device})")
-    print(f"  Phase 3: SKIPPED (no real temporal data)")
+    print(f"  Phase 3: Generative AutoEncoder (gen_head only, backbone frozen)")
     print(f"{'='*60}")
 
     # ── Phase 1: Masked Spectrum Modelling ─────────────────────────────────
@@ -62,17 +63,21 @@ def run_all_phases(
         batch_size=batch_size, patience=PHASE2_PATIENCE,
     )
 
-    # ── Phase 3: SKIPPED ───────────────────────────────────────────────────
-    print(f"\n[PHASE 3] SKIPPED — No real temporal sequence data in dataset.")
-    print(f"  Creating Phase 3 checkpoint alias from Phase 2 best...")
-    import shutil
-    p2_best = os.path.join(CKPT_PHASE2, 'slm_phase2_best.pt')
-    p3_dir  = os.path.join(os.path.dirname(CKPT_PHASE2), 'phase3')
-    os.makedirs(p3_dir, exist_ok=True)
-    p3_out = os.path.join(p3_dir, 'slm_phase3_best.pt')
-    if os.path.exists(p2_best) and not os.path.exists(p3_out):
-        shutil.copy2(p2_best, p3_out)
-        print(f"  Copied Phase 2 → {p3_out}")
+    # ── Phase 3: Generative AutoEncoder ───────────────────────────────────
+    print(f"\n[PHASE 3] Starting Generative AutoEncoder (gen_head only)...")
+    print(f"  SAFETY: backbone + classification heads are FROZEN.")
+    print(f"  Phase 1 & Phase 2 checkpoints will NOT be modified.")
+    p3_dir = os.path.join(os.path.dirname(CKPT_PHASE2), 'phase3')
+    run_phase3(
+        secondary_user_dir=SECONDARY_USER_DIR,
+        new_dataset_dir=NEW_DATASET_DIR,
+        p2_ckpt_dir=CKPT_PHASE2,
+        save_dir=p3_dir,
+        epochs=20,
+        lr=5e-3,
+        batch_size=256,
+        patience=5,
+    )
 
     print(f"\n{'='*60}")
     print("  ALL PHASES COMPLETE")
