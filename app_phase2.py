@@ -97,7 +97,19 @@ def load_model_and_normalizer(ckpt_path: str, norm_path: str):
     loaded_phase = None
     if ckpt_path and os.path.exists(ckpt_path):
         ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-        model.load_state_dict(ck.get("model", ck))
+        state = ck.get("model", ck)
+        # Filter out keys whose tensor sizes don't match current model
+        model_state = model.state_dict()
+        compatible = {
+            k: v for k, v in state.items()
+            if k in model_state and v.shape == model_state[k].shape
+        }
+        skipped = [k for k in state if k not in compatible]
+        if skipped:
+            print(f"[WARN] Skipped {len(skipped)} mismatched keys (old architecture):")
+            for k in skipped[:6]:
+                print(f"  {k}: ckpt={state[k].shape} vs model={model_state.get(k,'missing')}")
+        model.load_state_dict(compatible, strict=False)
         # Detect which phase the checkpoint came from
         if "phase3" in ckpt_path:
             loaded_phase = 3
@@ -105,6 +117,7 @@ def load_model_and_normalizer(ckpt_path: str, norm_path: str):
             loaded_phase = 2
         else:
             loaded_phase = 2
+
     model.eval()
 
     scaler = None
@@ -155,7 +168,18 @@ with st.sidebar:
 def run_inference(psd_vec: np.ndarray) -> dict:
     p = psd_vec.reshape(1, -1).astype(np.float32)
     if scaler is not None:
-        p = scaler.transform(p).astype(np.float32)
+        try:
+            # Guard: only use scaler if it was fitted on the same number of features
+            expected = getattr(scaler, 'n_features_in_', None) or getattr(
+                getattr(scaler, 'scaler', None), 'n_features_in_', None)
+            if expected is None or expected == p.shape[1]:
+                p = scaler.transform(p).astype(np.float32)
+            else:
+                # Old normalizer (176-bin) vs current 192-bin — do simple z-score inline
+                p = ((p - p.mean()) / (p.std() + 1e-8)).astype(np.float32)
+        except Exception:
+            p = ((p - p.mean()) / (p.std() + 1e-8)).astype(np.float32)
+
     t = torch.tensor(p, dtype=torch.float32)
     t0 = time.perf_counter()
     with torch.no_grad():
@@ -164,15 +188,22 @@ def run_inference(psd_vec: np.ndarray) -> dict:
     pu_p  = torch.softmax(out["pu_logits"],  dim=1)[0].numpy()
     mod_p = torch.softmax(out["mod_logits"], dim=1)[0].numpy()
     snr   = float(np.clip(out["snr_pred"][0].item(), 0, 30))
+
+    # Use the ACTUAL model output from the checkpoint
+    gen_pred_np = out["gen_pred"][0].numpy()   # model's reconstruction, normalized space
+    p_norm_np   = p[0]                         # what the model actually saw (normalized input)
+
     return {
-        "pu_prob":    float(pu_p[1]),
-        "pu_present": bool(pu_p[1] > 0.5),
-        "mod_probs":  mod_p.tolist(),
-        "mod_pred":   int(np.argmax(mod_p)),
-        "snr_db":     snr,
-        "gen_psd":    out["gen_pred"][0].numpy().tolist(),
-        "latency_ms": lat,
+        "pu_prob":     float(pu_p[1]),
+        "pu_present":  bool(pu_p[1] > 0.5),
+        "mod_probs":   mod_p.tolist(),
+        "mod_pred":    int(np.argmax(mod_p)),
+        "snr_db":      snr,
+        "gen_psd":     gen_pred_np.tolist(),   # normalized — for chart
+        "input_norm":  p_norm_np.tolist(),     # normalized input — for chart
+        "latency_ms":  lat,
     }
+
 
 
 def psd_fig(psd: np.ndarray, gen: np.ndarray = None, title: str = "PSD") -> go.Figure:
@@ -184,6 +215,7 @@ def psd_fig(psd: np.ndarray, gen: np.ndarray = None, title: str = "PSD") -> go.F
     if gen is not None:
         fig.add_trace(go.Scatter(x=freq, y=gen, mode="lines",
             name="Predicted Next PSD", line=dict(color="#3fb950", width=2, dash="dash")))
+
     fig.update_layout(
         title=dict(text=title, font=dict(color="#c9d1d9")),
         plot_bgcolor="#0d1117", paper_bgcolor="#0d1117", height=280,
@@ -222,77 +254,110 @@ with tab_scan:
                 
                 if uploaded_file is not None:
                     if st.button("🔍 Run Real Inference", use_container_width=True):
-                        # Load the real .pth file data
                         data = torch.load(uploaded_file, map_location="cpu", weights_only=False)
-                        
-                        raw_psd = None
-                        true_snr = None
-                        true_pu = None
-                        
-                        def extract_psd_recursive(obj):
-                            """Recursively hunts for the first substantial number array (>= 100 length)"""
-                            if isinstance(obj, np.ndarray) or torch.is_tensor(obj):
-                                flat = np.array(obj.cpu() if torch.is_tensor(obj) else obj).flatten()
-                                if len(flat) >= 100: 
-                                    return flat
-                            elif isinstance(obj, (list, tuple)):
-                                for item in obj:
-                                    res = extract_psd_recursive(item)
-                                    if res is not None: return res
-                            elif isinstance(obj, dict):
-                                # Prioritize likely keys
-                                for k in ['psd', 'power', 'features', 'spectrum', 'spectrogram']:
-                                    if k in obj:
-                                        res = extract_psd_recursive(obj[k])
-                                        if res is not None: return res
-                                # Fallback: search all keys
-                                for k, v in obj.items():
-                                    res = extract_psd_recursive(v)
-                                    if res is not None: return res
-                            return None
-                        
-                        if isinstance(data, dict):
-                            # Handle the exact 'pairs_by_bin' dictionary structure of the SDR dataset
-                            if 'pairs_by_bin' in data and 'bins' in data:
-                                pairs = data['pairs_by_bin']
-                                bins = data['bins']
-                                if len(bins) > 0:
-                                    first_snr_bin = bins[len(bins)//2] # Grab one from the middle
-                                    if first_snr_bin in pairs and len(pairs[first_snr_bin]) > 0:
-                                        raw_psd, true_pu = pairs[first_snr_bin][0]
-                                        true_snr = float(first_snr_bin)
-                        
-                        # Universal fallback: aggressively search the entire file structure
-                        if raw_psd is None:
-                            raw_psd = extract_psd_recursive(data)
-                            
-                        if raw_psd is not None:
-                            # Convert extracted list/tensor into the 176-bin numpy array required by the model
-                            psd_array = np.array(raw_psd, dtype=np.float32).flatten()
-                            if len(psd_array) >= N_BINS:
-                                psd_array = psd_array[:N_BINS]
-                            elif len(psd_array) < N_BINS:
-                                psd_array = np.pad(psd_array, (0, N_BINS - len(psd_array)))
-                                
-                            st.session_state.p2_psd = psd_array
-                            st.session_state.p2_res = run_inference(psd_array)
-                            
-                            res = st.session_state.p2_res
-                            pu_text = f"Primary User was **DETECTED** ({res['pu_prob']*100:.1f}% confidence)" if res["pu_present"] else f"NO Primary User found ({(1-res['pu_prob'])*100:.1f}% confidence of absence)"
-                            
-                            # Construct chat message with true file labels if we found them
-                            chat_msg = f"⚡ **Real Hardware Scan Uploaded & Analyzed:**\n- {pu_text}\n- Modulation: {MOD_NAMES_V2[res['mod_pred']]} ({res['mod_probs'][res['mod_pred']]*100:.1f}%)\n- Estimated SNR: {res['snr_db']:.1f} dB"
-                            
-                            if true_snr is not None and true_pu is not None:
-                                chat_msg += f"\n\n*(Embedded Ground Truth extracted from file: SNR {true_snr:.1f} dB, PU {'Present' if int(true_pu)==1 else 'Absent'})*"
-                            
-                            chat_msg += "\n\n*What would you like to know about this physical hardware trace?*"
-                            
+
+                        # ── Collect up to 100 samples across ALL SNR bins ──────────────
+                        samples = []   # list of (psd_array, true_pu, true_snr)
+
+                        def collect_from_pairs(pairs, bins, max_per_bin=8):
+                            for b in sorted(bins, reverse=True):  # highest SNR first
+                                if b not in pairs: continue
+                                for entry in pairs[b][:max_per_bin]:
+                                    psd_raw = np.array(entry[0], dtype=np.float32).flatten()
+                                    pu_val  = int(np.array(entry[1]).flatten()[0]) if len(entry) > 1 else -1
+                                    psd_arr = psd_raw[:N_BINS] if len(psd_raw) >= N_BINS else \
+                                              np.pad(psd_raw, (0, N_BINS - len(psd_raw)))
+                                    samples.append((psd_arr, pu_val, float(b)))
+                                    if len(samples) >= 100:
+                                        return
+
+                        if isinstance(data, dict) and 'pairs_by_bin' in data and 'bins' in data:
+                            collect_from_pairs(data['pairs_by_bin'], data['bins'])
+
+                        # Fallback: recursive search for one PSD
+                        if not samples:
+                            def find_psd(obj):
+                                if isinstance(obj, (np.ndarray,)) or torch.is_tensor(obj):
+                                    flat = np.array(obj.cpu() if torch.is_tensor(obj) else obj).flatten()
+                                    if len(flat) >= 100: return flat
+                                elif isinstance(obj, (list, tuple)):
+                                    for item in obj:
+                                        r = find_psd(item)
+                                        if r is not None: return r
+                                elif isinstance(obj, dict):
+                                    for k in ['psd','power','features','spectrum']:
+                                        if k in obj:
+                                            r = find_psd(obj[k])
+                                            if r is not None: return r
+                                    for v in obj.values():
+                                        r = find_psd(v)
+                                        if r is not None: return r
+                                return None
+                            raw = find_psd(data)
+                            if raw is not None:
+                                arr = raw[:N_BINS] if len(raw) >= N_BINS else np.pad(raw, (0, N_BINS - len(raw)))
+                                samples.append((arr.astype(np.float32), -1, None))
+
+                        if not samples:
+                            st.error("Could not find any PSD data in this .pth file.")
+                        else:
+                            # ── Batch inference ────────────────────────────────────────
+                            pu_preds, pu_probs, mod_preds, snr_preds = [], [], [], []
+                            true_pus, true_snrs = [], []
+
+                            for psd_arr, tpu, tsnr in samples:
+                                r = run_inference(psd_arr)
+                                pu_preds.append(int(r["pu_present"]))
+                                pu_probs.append(r["pu_prob"])
+                                mod_preds.append(r["mod_pred"])
+                                snr_preds.append(r["snr_db"])
+                                if tpu >= 0:  true_pus.append(tpu)
+                                if tsnr is not None: true_snrs.append(tsnr)
+
+                            # ── Aggregate results ──────────────────────────────────────
+                            mean_pu_prob  = float(np.mean(pu_probs))
+                            pu_detected   = mean_pu_prob > 0.5
+                            mean_snr      = float(np.mean(snr_preds))
+                            from collections import Counter
+                            top_mod       = Counter(mod_preds).most_common(1)[0][0]
+                            top_mod_pct   = 100 * Counter(mod_preds).most_common(1)[0][1] / len(mod_preds)
+
+                            # Accuracy vs ground truth
+                            acc_str = ""
+                            if true_pus:
+                                correct = sum(p == t for p, t in zip(pu_preds, true_pus))
+                                acc_str = f"\n- **PU Accuracy on this file: {correct}/{len(true_pus)} = {100*correct/len(true_pus):.1f}%**"
+                            gt_snr_str = f"{np.mean(true_snrs):.1f} dB" if true_snrs else "unknown"
+
+                            # Use highest-SNR sample's PSD for display
+                            best_psd = samples[0][0]
+                            res_display = run_inference(best_psd)
+
+                            st.session_state.p2_psd = best_psd
+                            st.session_state.p2_res = res_display
+
+                            # Override display metrics with batch aggregate
+                            st.session_state.p2_res["pu_prob"]    = mean_pu_prob
+                            st.session_state.p2_res["pu_present"] = pu_detected
+                            st.session_state.p2_res["snr_db"]     = mean_snr
+                            st.session_state.p2_res["mod_pred"]   = top_mod
+
+                            pu_text = (f"Primary User **DETECTED** ({mean_pu_prob*100:.1f}% avg confidence)"
+                                       if pu_detected else
+                                       f"NO Primary User ({(1-mean_pu_prob)*100:.1f}% avg confidence of absence)")
+
+                            chat_msg = (f"⚡ **Batch Inference on {len(samples)} samples from file:**\n"
+                                        f"- {pu_text}\n"
+                                        f"- Modulation: **{MOD_NAMES_V2[top_mod]}** ({top_mod_pct:.0f}% of samples)\n"
+                                        f"- Mean Estimated SNR: **{mean_snr:.1f} dB**"
+                                        f"{acc_str}\n"
+                                        f"- Ground Truth SNR: {gt_snr_str}\n\n"
+                                        f"*What would you like to know about this file?*")
+
                             if "messages" not in st.session_state:
                                 st.session_state.messages = []
                             st.session_state.messages.append({"role": "assistant", "content": chat_msg})
-                        else:
-                            st.error("Could not find a mathematically compatible PSD structure in this .pth file. Try a 'psd_binned_by_snr_...' file.")
+
             
             else:
                 snr_t  = st.slider("Target SNR (dB)", 3.0, 20.0, 10.0, 0.5)
@@ -330,11 +395,12 @@ with tab_scan:
         with col_res:
             if "p2_res" in st.session_state:
                 res = st.session_state.p2_res
-                psd = st.session_state.p2_psd
-                gen = np.array(res["gen_psd"]) * np.std(psd) + np.mean(psd)
+                # Use the normalized input and normalized prediction for a perfect 1:1 scale match
+                psd_norm = np.array(res.get("input_norm", st.session_state.p2_psd))
+                gen_norm = np.array(res.get("gen_psd", []))
                 
                 # Small visualization
-                fig_small = psd_fig(psd, gen, "Processed Snapshot")
+                fig_small = psd_fig(psd_norm, gen_norm if len(gen_norm) else None, "Processed Snapshot (Normalized)")
                 fig_small.update_layout(height=220, margin=dict(l=20,r=10,t=30,b=20))
                 st.plotly_chart(fig_small, use_container_width=True)
 
