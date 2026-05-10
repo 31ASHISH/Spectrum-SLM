@@ -210,7 +210,7 @@ def run_phase3(
     optimizer  = torch.optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
     scheduler  = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, "min", factor=0.5, patience=2, verbose=True)
+        optimizer, "min", factor=0.5, patience=2)
     criterion  = nn.MSELoss()
 
     best_val   = float("inf")
