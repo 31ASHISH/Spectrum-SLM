@@ -209,16 +209,21 @@ def run_phase3(
     # ── 4. Train ─────────────────────────────────────────────────────────────
     optimizer  = torch.optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
-    scheduler  = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, "min", factor=0.5, patience=2)
     criterion  = nn.MSELoss()
 
     best_val   = float("inf")
     no_improve = 0
+    cur_lr     = lr
 
     print(f"\n{'─'*60}")
     for ep in range(1, epochs + 1):
-        # Train
+        # Halve LR every 7 epochs if no improvement
+        if ep > 1 and (ep - 1) % 7 == 0:
+            cur_lr *= 0.5
+            for pg in optimizer.param_groups:
+                pg["lr"] = cur_lr
+            print(f"  [LR] → {cur_lr:.6f}")
+
         model.train()
         tr_losses = []
         for bx, by in train_loader:
