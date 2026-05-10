@@ -52,35 +52,40 @@ def _collect_psds(su_dir: str, nd_dir: str) -> np.ndarray:
     """
     Collect raw PSD arrays (float32, shape N×192) from all available .pth files.
     Labels are NOT needed — Phase 3 is purely unsupervised reconstruction.
+    Uses EXCLUSIVE logic: tries binned format first; only falls back to log if
+    no binned data was found in that file (avoids double-loading same file).
     """
     psds = []
 
-    def _from_binned(path: str):
+    def _try_load(path: str):
+        """Try binned format first, then log format — never both."""
         if not os.path.exists(path):
             return
-        data = torch.load(path, map_location="cpu", weights_only=False)
-        pairs = data.get("pairs_by_bin", {})
-        for bin_key in pairs:
-            for entry in pairs[bin_key]:
-                raw = np.array(entry[0], dtype=np.float32).flatten()
-                if len(raw) >= N_BINS:
-                    psds.append(raw[:N_BINS])
-                else:
-                    psds.append(np.pad(raw, (0, N_BINS - len(raw))))
+        try:
+            data = torch.load(path, map_location="cpu", weights_only=False)
+        except Exception:
+            return
 
-    def _from_log(path: str):
-        if not os.path.exists(path):
-            return
-        data = torch.load(path, map_location="cpu", weights_only=False)
+        # ── Binned format: dict with 'pairs_by_bin' ──────────────────────
+        if isinstance(data, dict) and "pairs_by_bin" in data:
+            pairs = data["pairs_by_bin"]
+            for bin_key in pairs:
+                for entry in pairs[bin_key]:
+                    try:
+                        raw = np.array(entry[0], dtype=np.float32).flatten()
+                        if len(raw) >= N_BINS:
+                            psds.append(raw[:N_BINS])
+                        elif len(raw) >= 64:   # accept shorter if padded
+                            psds.append(np.pad(raw, (0, N_BINS - len(raw))))
+                    except Exception:
+                        pass
+            return   # done — do NOT fall through to log format
+
+        # ── Log format: list/tuple of arrays ─────────────────────────────
         if isinstance(data, (list, tuple)):
             for item in data:
-                raw = np.array(item, dtype=np.float32).flatten()
-                if len(raw) >= N_BINS:
-                    psds.append(raw[:N_BINS])
-        elif isinstance(data, dict):
-            for v in data.values():
                 try:
-                    raw = np.array(v, dtype=np.float32).flatten()
+                    raw = np.array(item, dtype=np.float32).flatten()
                     if len(raw) >= N_BINS:
                         psds.append(raw[:N_BINS])
                 except Exception:
@@ -88,20 +93,19 @@ def _collect_psds(su_dir: str, nd_dir: str) -> np.ndarray:
 
     # Secondary_User/ — binned files
     if os.path.isdir(su_dir):
-        for f in os.listdir(su_dir):
+        for f in sorted(os.listdir(su_dir)):
             if f.endswith(".pth"):
-                _from_binned(os.path.join(su_dir, f))
+                _try_load(os.path.join(su_dir, f))
 
-    # New dataset (log files)
+    # New dataset
     if os.path.isdir(nd_dir):
         for root, dirs, files in os.walk(nd_dir):
-            for f in files:
+            for f in sorted(files):
                 if f.endswith(".pth"):
-                    fp = os.path.join(root, f)
-                    _from_binned(fp)   # try binned first
-                    _from_log(fp)      # also try log
+                    _try_load(os.path.join(root, f))
 
-    return np.array(psds, dtype=np.float32)
+    return np.array(psds, dtype=np.float32) if psds else np.zeros((0, N_BINS), dtype=np.float32)
+
 
 
 def run_phase3(
@@ -157,6 +161,17 @@ def run_phase3(
         print("  [WARN] normalizer.pkl not found — using per-sample z-score")
         psds_norm = ((psds_raw - psds_raw.mean(axis=1, keepdims=True))
                      / (psds_raw.std(axis=1, keepdims=True) + 1e-8))
+
+    # Clip extreme outliers and drop any samples that are still insane
+    psds_norm = np.clip(psds_norm, -10.0, 10.0)
+    finite_mask = np.isfinite(psds_norm).all(axis=1)
+    n_dropped = (~finite_mask).sum()
+    if n_dropped > 0:
+        print(f"  [WARN] Dropped {n_dropped} non-finite samples after normalization")
+    psds_norm = psds_norm[finite_mask]
+    print(f"  Normalized range: [{psds_norm.min():.2f}, {psds_norm.max():.2f}]  samples: {len(psds_norm):,}")
+
+
 
     # Train / Val split (85 / 15)
     n_total = len(psds_norm)
