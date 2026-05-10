@@ -193,16 +193,31 @@ def run_inference(psd_vec: np.ndarray) -> dict:
     gen_pred_np = out["gen_pred"][0].numpy()   # model's reconstruction, normalized space
     p_norm_np   = p[0]                         # what the model actually saw (normalized input)
 
+    # Inverse-transform both to raw (dB) scale for display
+    try:
+        n_feats = getattr(scaler, "n_features_in_", None)
+        if scaler is not None and n_feats == len(p_norm_np):
+            input_raw = scaler.inverse_transform(p_norm_np.reshape(1, -1))[0]
+            gen_raw   = scaler.inverse_transform(gen_pred_np.reshape(1, -1))[0]
+        else:
+            # Fallback: keep normalized
+            input_raw = p_norm_np
+            gen_raw   = gen_pred_np
+    except Exception:
+        input_raw = p_norm_np
+        gen_raw   = gen_pred_np
+
     return {
         "pu_prob":     float(pu_p[1]),
         "pu_present":  bool(pu_p[1] > 0.5),
         "mod_probs":   mod_p.tolist(),
         "mod_pred":    int(np.argmax(mod_p)),
         "snr_db":      snr,
-        "gen_psd":     gen_pred_np.tolist(),   # normalized — for chart
-        "input_norm":  p_norm_np.tolist(),     # normalized input — for chart
+        "gen_psd":     gen_raw.tolist(),      # raw dB scale
+        "input_norm":  input_raw.tolist(),    # raw dB scale
         "latency_ms":  lat,
     }
+
 
 
 
@@ -220,7 +235,7 @@ def psd_fig(psd: np.ndarray, gen: np.ndarray = None, title: str = "PSD") -> go.F
         title=dict(text=title, font=dict(color="#c9d1d9")),
         plot_bgcolor="#0d1117", paper_bgcolor="#0d1117", height=280,
         xaxis=dict(title="Frequency (MHz)", color="#8b949e", gridcolor="#21262d"),
-        yaxis=dict(title="Power (norm.)", color="#8b949e", gridcolor="#21262d"),
+        yaxis=dict(title="Power (dB)", color="#8b949e", gridcolor="#21262d"),
         legend=dict(bgcolor="#161b22", font=dict(color="#c9d1d9")),
         font=dict(family="Inter"), margin=dict(l=40,r=20,t=40,b=40),
     )
@@ -400,7 +415,7 @@ with tab_scan:
                 gen_norm = np.array(res.get("gen_psd", []))
                 
                 # Small visualization
-                fig_small = psd_fig(psd_norm, gen_norm if len(gen_norm) else None, "Processed Snapshot (Normalized)")
+                fig_small = psd_fig(psd_norm, gen_norm if len(gen_norm) else None, "Processed Snapshot (dB)")
                 fig_small.update_layout(height=220, margin=dict(l=20,r=10,t=30,b=20))
                 st.plotly_chart(fig_small, use_container_width=True)
 
