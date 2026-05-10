@@ -248,7 +248,6 @@ def run_phase3(
 
         tr_l = float(np.mean(tr_losses))
         vl_l = float(np.mean(vl_losses))
-        scheduler.step(vl_l)
         print(f"  Epoch {ep:3d}/{epochs} │ train_mse={tr_l:.4f} │ val_mse={vl_l:.4f}", end="")
 
         if vl_l < best_val:
