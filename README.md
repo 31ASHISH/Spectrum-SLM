@@ -16,7 +16,7 @@
 
 ---
 
-**B.Tech Project | Dept. of Electronics & Communication Engineering**  
+**B.Tech Project | **  
 **Authors:** Anjani · Ashish Joshi · Mayank &nbsp;|&nbsp; **Guide:** Dr. Abhinandan S.P. &nbsp;|&nbsp; **May 2026**
 
 </div>
